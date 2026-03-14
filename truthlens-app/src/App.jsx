@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Upload, Shield, Zap, Eye, CheckCircle, AlertTriangle, Home, Info, Mail, Lock, Film, Crosshair, Scissors, Maximize, Layers, Cpu, ArrowDown } from 'lucide-react';
+import { Upload, Shield, Zap, Eye, CheckCircle, AlertTriangle, Home, Info, Mail, Lock, Film, Crosshair, Scissors, Maximize, Layers, Cpu, ArrowDown, XCircle } from 'lucide-react';
+
+const API_BASE = "http://localhost:5000";
 
 const TruthLensApp = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -8,6 +10,7 @@ const TruthLensApp = () => {
   const [result, setResult] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [analysisStep, setAnalysisStep] = useState(0);
+  const [error, setError] = useState(null);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -23,7 +26,6 @@ const TruthLensApp = () => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
@@ -38,53 +40,73 @@ const TruthLensApp = () => {
   const handleFile = (uploadedFile) => {
     setFile(uploadedFile);
     setResult(null);
+    setError(null);
   };
 
-  const analyzeFile = () => {
+  // ─────────────────────────────────────────────────────────
+  //  analyzeFile — sends real request to Flask backend
+  // ─────────────────────────────────────────────────────────
+  const analyzeFile = async () => {
     if (!file) return;
-    
+
     setAnalyzing(true);
     setResult(null);
+    setError(null);
     setAnalysisStep(0);
-    
+
     const isVideo = file.type.startsWith('video/');
 
+    // For video: run the pipeline step animation in parallel with the fetch.
+    // The animation simply advances through steps while we wait for the backend.
+    let animInterval = null;
     if (isVideo) {
-      // Simulate pipeline steps
-      let currentStep = 0;
-      const totalSteps = 8;
-      
-      const interval = setInterval(() => {
-        currentStep++;
-        setAnalysisStep(currentStep);
-        
-        if (currentStep >= totalSteps) {
-          clearInterval(interval);
-          setTimeout(() => {
-            const isDeepfake = Math.random() > 0.5;
-            const confidence = Math.floor(Math.random() * 20) + 80;
-            setResult({
-              isDeepfake,
-              confidence,
-              fileName: file.name
-            });
-            setAnalyzing(false);
-          }, 800); // Small delay before showing result
+      let step = 0;
+      const TOTAL_STEPS = 8;
+      animInterval = setInterval(() => {
+        step++;
+        setAnalysisStep(step);
+        if (step >= TOTAL_STEPS) {
+          clearInterval(animInterval);
+          animInterval = null;
         }
-      }, 1000); // 1 second per step
-    } else {
-      // Standard image analysis
-      setTimeout(() => {
-        const isDeepfake = Math.random() > 0.5;
-        const confidence = Math.floor(Math.random() * 20) + 80;
-        
-        setResult({
-          isDeepfake,
-          confidence,
-          fileName: file.name
-        });
-        setAnalyzing(false);
-      }, 3000);
+      }, 1000);
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const endpoint = isVideo ? `${API_BASE}/predict` : `${API_BASE}/predict-image`;
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Server error: ${response.status}`);
+      }
+
+      setResult({
+        isDeepfake: data.isDeepfake,
+        confidence: data.confidence,
+        label: data.label,
+        fileName: file.name,
+      });
+    } catch (err) {
+      console.error("Analysis failed:", err);
+      // Distinguish network errors from server errors
+      if (err instanceof TypeError && err.message.toLowerCase().includes("fetch")) {
+        setError("Cannot reach the backend. Make sure the Python server is running on port 5000.");
+      } else {
+        setError(err.message || "An unexpected error occurred during analysis.");
+      }
+    } finally {
+      // Always clean up animation and loading state
+      if (animInterval) clearInterval(animInterval);
+      setAnalyzing(false);
     }
   };
 
@@ -93,9 +115,12 @@ const TruthLensApp = () => {
     setResult(null);
     setAnalyzing(false);
     setAnalysisStep(0);
+    setError(null);
   };
 
-  // Homepage Component
+  // ─────────────────────────────────────────────────────────
+  //  HomePage Component
+  // ─────────────────────────────────────────────────────────
   const HomePage = () => (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       {/* Navigation */}
@@ -105,7 +130,7 @@ const TruthLensApp = () => {
             <Shield className="w-8 h-8 text-blue-400" />
             <span className="text-2xl font-bold text-white">TruthLens</span>
           </div>
-          <button 
+          <button
             onClick={() => setCurrentPage('detector')}
             className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
           >
@@ -123,20 +148,20 @@ const TruthLensApp = () => {
               <span className="text-sm text-blue-300">AI-Powered Detection</span>
             </div>
           </div>
-          
+
           <h1 className="text-6xl font-bold text-white mb-6 leading-tight">
             Detect Deepfakes<br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
               in Seconds
             </span>
           </h1>
-          
+
           <p className="text-xl text-slate-300 mb-12 max-w-2xl mx-auto">
-            AI-powered tool to verify authenticity of videos and images. 
+            AI-powered tool to verify authenticity of videos and images.
             Protect yourself from digital misinformation.
           </p>
-          
-          <button 
+
+          <button
             onClick={() => setCurrentPage('detector')}
             className="px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-xl font-semibold text-lg shadow-lg shadow-blue-500/50 transition-all transform hover:scale-105"
           >
@@ -144,7 +169,7 @@ const TruthLensApp = () => {
           </button>
         </div>
 
-        {/* Visual Element */}
+        {/* How it works visual */}
         <div className="mt-20 relative">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 blur-3xl"></div>
           <div className="relative bg-slate-800/50 backdrop-blur-xl border border-blue-500/30 rounded-2xl p-12">
@@ -229,7 +254,9 @@ const TruthLensApp = () => {
     </div>
   );
 
-  // Detector Page Component
+  // ─────────────────────────────────────────────────────────
+  //  DetectorPage Component
+  // ─────────────────────────────────────────────────────────
   const DetectorPage = () => (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       {/* Navigation */}
@@ -239,7 +266,7 @@ const TruthLensApp = () => {
             <Shield className="w-8 h-8 text-blue-400" />
             <span className="text-2xl font-bold text-white">TruthLens</span>
           </div>
-          <button 
+          <button
             onClick={() => {
               setCurrentPage('home');
               resetDetector();
@@ -259,7 +286,29 @@ const TruthLensApp = () => {
           <p className="text-xl text-slate-300">Upload an image or video to analyze its authenticity</p>
         </div>
 
-        {/* Upload Area */}
+        {/* ── Error Banner ── */}
+        {error && (
+          <div className="mb-8 bg-red-900/40 border border-red-500/50 rounded-xl p-5 flex items-start gap-4">
+            <XCircle className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-300 font-semibold mb-1">Analysis Failed</p>
+              <p className="text-red-400 text-sm">{error}</p>
+              {error.includes("port 5000") && (
+                <p className="text-red-500/80 text-xs mt-2 font-mono">
+                  cd backend &nbsp;→&nbsp; python app.py
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-500 hover:text-red-300 transition-colors text-xl leading-none"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* ── Upload Area ── */}
         {!result && (
           <div className="bg-slate-800/50 backdrop-blur-xl border-2 border-dashed border-blue-500/50 rounded-2xl p-12 mb-8">
             <div
@@ -276,26 +325,22 @@ const TruthLensApp = () => {
                 accept="image/*,video/*"
                 onChange={handleFileInput}
               />
-              
-              <label
-                htmlFor="fileInput"
-                className="flex flex-col items-center cursor-pointer"
-              >
+
+              <label htmlFor="fileInput" className="flex flex-col items-center cursor-pointer">
                 <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 transition-colors ${
                   dragActive ? 'bg-blue-500/30' : 'bg-blue-500/10'
                 }`}>
                   <Upload className="w-12 h-12 text-blue-400" />
                 </div>
-                
+
                 {file ? (
                   <div className="text-center">
-                    <p className="text-white font-semibold mb-2">{file.name}</p>
-                    <p className="text-slate-400 text-sm mb-4">File ready for analysis</p>
+                    <p className="text-white font-semibold mb-1">{file.name}</p>
+                    <p className="text-slate-400 text-sm mb-4">
+                      {file.type.startsWith('video/') ? '🎬 Video' : '🖼️ Image'} — ready for analysis
+                    </p>
                     <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        resetDetector();
-                      }}
+                      onClick={(e) => { e.preventDefault(); resetDetector(); }}
                       className="text-blue-400 hover:text-blue-300 text-sm"
                     >
                       Choose different file
@@ -305,7 +350,7 @@ const TruthLensApp = () => {
                   <div className="text-center">
                     <p className="text-white font-semibold mb-2">Drop your file here</p>
                     <p className="text-slate-400 mb-4">or click to browse</p>
-                    <p className="text-slate-500 text-sm">Supports images and videos</p>
+                    <p className="text-slate-500 text-sm">Supports images (jpg, png) and videos (mp4, avi, mov)</p>
                   </div>
                 )}
               </label>
@@ -313,7 +358,7 @@ const TruthLensApp = () => {
           </div>
         )}
 
-        {/* Analyze Button */}
+        {/* ── Analyze Button ── */}
         {file && !analyzing && !result && (
           <div className="text-center mb-8">
             <button
@@ -325,76 +370,77 @@ const TruthLensApp = () => {
           </div>
         )}
 
-        {/* Loading State */}
+        {/* ── Loading / Pipeline Animation ── */}
         {analyzing && (
           <div className="bg-slate-800/50 backdrop-blur-xl border border-blue-500/30 rounded-2xl p-12">
-            
             {file && file.type.startsWith('video/') ? (
-               <div className="max-w-md mx-auto">
-                 <h3 className="text-2xl font-semibold text-white mb-6 text-center">Correct prediction pipeline</h3>
-                 <p className="text-slate-400 text-center mb-8">When a user uploads a video, your system should run this pipeline:</p>
-                 
-                 <div className="space-y-2 bg-slate-900/60 rounded-xl p-6 border border-slate-700/50">
-                    {/* Pipeline Steps */}
-                    {[
-                      { title: 'User uploads video', icon: <Upload className="w-5 h-5" /> },
-                      { title: 'Extract frames', icon: <Film className="w-5 h-5" /> },
-                      { title: 'Face detection', icon: <Crosshair className="w-5 h-5" /> },
-                      { title: 'Crop faces', icon: <Scissors className="w-5 h-5" /> },
-                      { title: 'Resize to 224x224', icon: <Maximize className="w-5 h-5" /> },
-                      { title: 'Create sequence of 15 frames', icon: <Layers className="w-5 h-5" /> },
-                      { title: 'CNN + LSTM', icon: <Cpu className="w-5 h-5" /> },
-                      { title: 'Prediction', icon: <Eye className="w-5 h-5" /> }
-                    ].map((step, index) => (
-                      <React.Fragment key={index}>
-                        <div className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${
-                          analysisStep >= index ? 'bg-blue-500/20 text-white shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'text-slate-500'
+              /* VIDEO: show pipeline steps */
+              <div className="max-w-md mx-auto">
+                <h3 className="text-2xl font-semibold text-white mb-2 text-center">Processing Video</h3>
+                <p className="text-slate-400 text-center mb-8 text-sm">Running full inference pipeline…</p>
+
+                <div className="space-y-2 bg-slate-900/60 rounded-xl p-6 border border-slate-700/50">
+                  {[
+                    { title: 'User uploads video',         icon: <Upload className="w-5 h-5" /> },
+                    { title: 'Extract 15 frames',          icon: <Film className="w-5 h-5" /> },
+                    { title: 'Face detection (MediaPipe)', icon: <Crosshair className="w-5 h-5" /> },
+                    { title: 'Crop faces',                 icon: <Scissors className="w-5 h-5" /> },
+                    { title: 'Resize to 224×224',          icon: <Maximize className="w-5 h-5" /> },
+                    { title: 'Create 15-frame sequence',   icon: <Layers className="w-5 h-5" /> },
+                    { title: 'CNN + LSTM inference',       icon: <Cpu className="w-5 h-5" /> },
+                    { title: 'Prediction',                 icon: <Eye className="w-5 h-5" /> },
+                  ].map((step, index) => (
+                    <React.Fragment key={index}>
+                      <div className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${
+                        analysisStep >= index
+                          ? 'bg-blue-500/20 text-white shadow-[0_0_15px_rgba(59,130,246,0.2)]'
+                          : 'text-slate-500'
+                      }`}>
+                        <div className={`flex items-center justify-center p-2 rounded-md ${
+                          analysisStep >= index ? 'bg-blue-500/30 text-blue-400' : 'bg-slate-800 text-slate-600'
                         }`}>
-                          <div className={`flex items-center justify-center p-2 rounded-md ${
-                            analysisStep >= index ? 'bg-blue-500/30 text-blue-400' : 'bg-slate-800 text-slate-600'
-                          }`}>
-                            {step.icon}
-                          </div>
-                          <span className="font-mono text-sm tracking-widest uppercase flex-1">
-                            {step.title}
-                          </span>
-                          {analysisStep === index && (
-                             <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
-                          )}
+                          {step.icon}
                         </div>
-                        
-                        {index < 7 && (
-                          <div className="flex justify-center my-1">
-                            <ArrowDown className={`w-4 h-4 ${analysisStep > index ? 'text-blue-500' : 'text-slate-700'}`} />
-                          </div>
+                        <span className="font-mono text-sm tracking-widest uppercase flex-1">
+                          {step.title}
+                        </span>
+                        {analysisStep === index && (
+                          <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
                         )}
-                      </React.Fragment>
-                    ))}
-                 </div>
-                 
-                 <div className="mt-8 text-center text-slate-300 font-medium">
-                   So the <span className="text-white font-bold">background never reaches the model</span>.
-                 </div>
-               </div>
+                        {analysisStep > index && (
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                        )}
+                      </div>
+                      {index < 7 && (
+                        <div className="flex justify-center my-1">
+                          <ArrowDown className={`w-4 h-4 ${analysisStep > index ? 'text-blue-500' : 'text-slate-700'}`} />
+                        </div>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                <div className="mt-6 text-center text-slate-400 text-sm">
+                  Sending video to backend — this may take a moment…
+                </div>
+              </div>
             ) : (
+              /* IMAGE: spinner */
               <div className="text-center">
                 <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-6"></div>
-                <h3 className="text-2xl font-semibold text-white mb-2">Analyzing...</h3>
-                <p className="text-slate-400">Our AI is examining your media for signs of manipulation</p>
-                
-                {/* Progress Bar */}
+                <h3 className="text-2xl font-semibold text-white mb-2">Analyzing Image…</h3>
+                <p className="text-slate-400">Face detection → CNN inference</p>
                 <div className="mt-8 max-w-md mx-auto">
                   <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full animate-pulse" style={{width: '75%'}}></div>
+                    <div className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full animate-pulse" style={{ width: '75%' }}></div>
                   </div>
                 </div>
               </div>
             )}
-            
           </div>
         )}
 
-        {/* Results */}
+        {/* ── Results ── */}
         {result && (
           <div className="space-y-6">
             <div className={`bg-slate-800/50 backdrop-blur-xl border-2 rounded-2xl p-8 ${
@@ -404,23 +450,21 @@ const TruthLensApp = () => {
                 <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 ${
                   result.isDeepfake ? 'bg-red-500/20' : 'bg-green-500/20'
                 }`}>
-                  {result.isDeepfake ? (
-                    <AlertTriangle className="w-10 h-10 text-red-400" />
-                  ) : (
-                    <CheckCircle className="w-10 h-10 text-green-400" />
-                  )}
+                  {result.isDeepfake
+                    ? <AlertTriangle className="w-10 h-10 text-red-400" />
+                    : <CheckCircle className="w-10 h-10 text-green-400" />}
                 </div>
-                
+
                 <h2 className={`text-3xl font-bold mb-2 ${
                   result.isDeepfake ? 'text-red-400' : 'text-green-400'
                 }`}>
                   {result.isDeepfake ? 'Deepfake Detected' : 'Authentic'}
                 </h2>
-                
+
                 <p className="text-slate-300 mb-6">
-                  {result.isDeepfake 
-                    ? 'This media shows signs of artificial manipulation'
-                    : 'This media appears to be genuine'}
+                  {result.isDeepfake
+                    ? 'This media shows signs of artificial manipulation.'
+                    : 'This media appears to be genuine.'}
                 </p>
 
                 {/* Confidence Score */}
@@ -430,13 +474,13 @@ const TruthLensApp = () => {
                     <span className="text-white font-bold text-lg">{result.confidence}%</span>
                   </div>
                   <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${
-                        result.isDeepfake 
-                          ? 'bg-gradient-to-r from-red-500 to-orange-500' 
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        result.isDeepfake
+                          ? 'bg-gradient-to-r from-red-500 to-orange-500'
                           : 'bg-gradient-to-r from-green-500 to-emerald-500'
                       }`}
-                      style={{width: `${result.confidence}%`}}
+                      style={{ width: `${result.confidence}%` }}
                     ></div>
                   </div>
                 </div>
@@ -453,16 +497,13 @@ const TruthLensApp = () => {
             <div className="flex gap-4 justify-center">
               <button
                 onClick={resetDetector}
-                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-iiiiiioimii rounded-lg font-medium transition-colors"
               >
                 Analyze Another File
               </button>
               <button
-                onClick={() => {
-                  setCurrentPage('home');
-                  resetDetector();
-                }}
-                className="px-8 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
+                onClick={() => { setCurrentPage('home'); resetDetector(); }}
+                 className="px-8 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors"
               >
                 Back to Home
               </button>

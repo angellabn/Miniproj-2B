@@ -1,0 +1,7 @@
+__pycache__/
+*.h5
+*.keras
+*.pth
+*.pt
+temp_uploads/
+.env
